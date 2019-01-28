@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module TheGraph where
 import           Data.Graph.Inductive.Graph        (mkGraph)
 import           Data.Graph.Inductive.PatriciaTree (Gr)
