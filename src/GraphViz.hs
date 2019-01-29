@@ -1,5 +1,5 @@
 {-# LANGUAGE PartialTypeSignatures #-}
-module GV where
+module GraphViz where
 
 import           Data.Graph.Inductive.Graph        (Node, subgraph)
 import           Data.Graph.Inductive.Query.DFS    (dfs)

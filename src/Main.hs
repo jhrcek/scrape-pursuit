@@ -1,11 +1,11 @@
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
-{-# OPTIONS_GHC -Wall #-}
 module Main where
-import           Conduit                           (concatC, iterMC, liftIO,
-                                                    mapC, mapMC, runConduit,
-                                                    sinkList, yieldMany, (.|))
+import           Conduit                           (concatMapC, iterMC, liftIO,
+                                                    mapMC, runConduit, sinkList,
+                                                    yieldMany, (.|))
+import           Control.Monad                     (when)
 import           Data.Graph.Inductive.Graph        (mkGraph)
 import           Data.Graph.Inductive.PatriciaTree (Gr)
 import qualified Data.Map                          as Map
@@ -13,7 +13,8 @@ import           Data.Maybe                        (catMaybes, fromMaybe)
 import qualified Data.Set                          as Set
 import           Data.Text                         (Text)
 import qualified Data.Text                         as Text
-import qualified Data.Text.IO
+import           GithubAPI                         (Repo (Repo), Tag (Tag))
+import qualified GithubAPI
 import           Test.WebDriver                    (Selector (ByCSS, ByClass, ByXPath),
                                                     WD, WDConfig, attr, chrome,
                                                     defaultConfig, finallyClose,
@@ -26,7 +27,7 @@ type NodeLabel = Text
 
 data PackageInfo = PackageInfo
     { packageName      :: Text
-    , githubOrgAndRepo :: Text
+    , githubOrgAndRepo :: Repo
     , packageDeps      :: [Text]
     , latestVersion    :: Text
     } deriving Show
@@ -38,12 +39,25 @@ main = do
         runConduit $
             yieldMany pkgLinks
             .| mapMC getPackageInfo
-            .| iterMC (liftIO . Data.Text.IO.putStrLn . githubOrgAndRepo)
-            .| mapC getDependencyEdges
-            .| concatC
+            .| iterMC (liftIO . checkLatestVersionOnPursuitCorrespondsToLatestGithubTag)
+            .| concatMapC getDependencyEdges
             .| sinkList
     let depGraph = buildGraph dependencyPairs
     print depGraph
+
+checkLatestVersionOnPursuitCorrespondsToLatestGithubTag :: PackageInfo -> IO ()
+checkLatestVersionOnPursuitCorrespondsToLatestGithubTag
+    PackageInfo{githubOrgAndRepo, latestVersion} = do
+        mTag <- GithubAPI.getLatestTag githubOrgAndRepo
+        case mTag of
+          Nothing -> putStrLn $ "Failed to retrieve latest tag for " <> show githubOrgAndRepo
+          Just (Tag tag) -> case Text.uncons tag of
+            Just ('v', version) -> when (version /= latestVersion) $
+                putStrLn $ "Package docs not up to date for " <> show githubOrgAndRepo
+                           <> ". Pursuit: " <> show latestVersion
+                           <> ", GitHub: " <> show tag
+            Just _ -> putStrLn $ "WARNING: latest tag doesn't start with 'v':" <> show tag
+            Nothing -> putStrLn "WARNING: empty tag!"
 
 buildGraph :: [(Text, Text)] -> Gr NodeLabel ()
 buildGraph edgeLabels =
@@ -59,7 +73,7 @@ getPackageInfo :: Text -> WD PackageInfo
 getPackageInfo url = do
     openPage (Text.unpack url)
     packageDeps <- traverse getText =<< findElems (ByClass "deplink__link")
-    githubOrgAndRepo <- getText =<< findElem (ByXPath "//dt[contains(text(),'Repository')]/following-sibling::dd[1]/a")
+    githubOrgAndRepo <- Repo <$> (getText =<< findElem (ByXPath "//dt[contains(text(),'Repository')]/following-sibling::dd[1]/a"))
     currentUrl <- Text.pack <$> getCurrentURL
     let packageName = lastError ("Failed to retrieve package name from url " <> Text.unpack url) $ Text.splitOn "/" url
     let latestVersion = lastError ("Failed to retrieve version from url " <> Text.unpack currentUrl) $ Text.splitOn "/" currentUrl
