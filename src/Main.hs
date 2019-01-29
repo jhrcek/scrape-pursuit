@@ -1,25 +1,35 @@
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards   #-}
 {-# OPTIONS_GHC -Wall #-}
 module Main where
 import           Conduit                           (concatC, iterMC, liftIO,
-                                                    mapMC, runConduit, sinkList,
-                                                    yieldMany, (.|))
+                                                    mapC, mapMC, runConduit,
+                                                    sinkList, yieldMany, (.|))
 import           Data.Graph.Inductive.Graph        (mkGraph)
 import           Data.Graph.Inductive.PatriciaTree (Gr)
 import qualified Data.Map                          as Map
 import           Data.Maybe                        (catMaybes, fromMaybe)
 import qualified Data.Set                          as Set
-import           Data.Text                         (Text, unpack)
+import           Data.Text                         (Text)
 import qualified Data.Text                         as Text
-import           Test.WebDriver                    (Selector (ByCSS, ByClass),
+import qualified Data.Text.IO
+import           Test.WebDriver                    (Selector (ByCSS, ByClass, ByXPath),
                                                     WD, WDConfig, attr, chrome,
                                                     defaultConfig, finallyClose,
-                                                    findElems, getText,
+                                                    findElem, findElems,
+                                                    getCurrentURL, getText,
                                                     openPage, runSession,
                                                     useBrowser)
 
 type NodeLabel = Text
+
+data PackageInfo = PackageInfo
+    { packageName      :: Text
+    , githubOrgAndRepo :: Text
+    , packageDeps      :: [Text]
+    , latestVersion    :: Text
+    } deriving Show
 
 main :: IO ()
 main = do
@@ -27,9 +37,10 @@ main = do
         pkgLinks <- getAllPackageLinks
         runConduit $
             yieldMany pkgLinks
-            .| mapMC getDependencyEdges
+            .| mapMC getPackageInfo
+            .| iterMC (liftIO . Data.Text.IO.putStrLn . githubOrgAndRepo)
+            .| mapC getDependencyEdges
             .| concatC
-            .| iterMC (liftIO . print)
             .| sinkList
     let depGraph = buildGraph dependencyPairs
     print depGraph
@@ -44,19 +55,27 @@ buildGraph edgeLabels =
     lookupId lbl = Map.findWithDefault 0 lbl pkgNameToId
     edges = fmap (\(fromLabel, toLabel) -> (lookupId fromLabel, lookupId toLabel, ())   ) edgeLabels
 
-getDependencyEdges :: Text -> WD [(Text, Text)]
-getDependencyEdges url = do
-    openPage (unpack url)
-    deps <- traverse getText =<< findElems (ByClass "deplink__link")
-    let pkgName = last $ Text.splitOn "/" url
-    return $ mkEdges pkgName deps
+getPackageInfo :: Text -> WD PackageInfo
+getPackageInfo url = do
+    openPage (Text.unpack url)
+    packageDeps <- traverse getText =<< findElems (ByClass "deplink__link")
+    githubOrgAndRepo <- getText =<< findElem (ByXPath "//dt[contains(text(),'Repository')]/following-sibling::dd[1]/a")
+    currentUrl <- Text.pack <$> getCurrentURL
+    let packageName = lastError ("Failed to retrieve package name from url " <> Text.unpack url) $ Text.splitOn "/" url
+    let latestVersion = lastError ("Failed to retrieve version from url " <> Text.unpack currentUrl) $ Text.splitOn "/" currentUrl
+    return PackageInfo{..}
 
-mkEdges :: Text -> [Text] -> [(Text, Text)]
-mkEdges pkgName =
-    fmap (\dep -> (dropPurescript pkgName, dropPurescript dep))
+lastError :: String -> [a] -> a
+lastError err [] = error err
+lastError _ xs   = last xs
+
+getDependencyEdges :: PackageInfo -> [(Text, Text)]
+getDependencyEdges PackageInfo{packageName, packageDeps} =
+   fmap (\dep -> (dropPurescript packageName, dropPurescript dep)) packageDeps
 
 dropPurescript :: Text -> Text
-dropPurescript x = fromMaybe ("JS:" <> x) $ Text.stripPrefix "purescript-" x
+dropPurescript x =
+    fromMaybe ("JS:" <> x) $ Text.stripPrefix "purescript-" x
 
 chromeCaps :: WDConfig
 chromeCaps =

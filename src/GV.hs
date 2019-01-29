@@ -6,12 +6,14 @@ import           Data.Graph.Inductive.Query.DFS    (dfs)
 import           Data.GraphViz                     (GlobalAttributes (GraphAttrs),
                                                     GraphvizCanvas (Xlib),
                                                     GraphvizCommand (Dot),
-                                                    fmtNode, globalAttributes,
+                                                    GraphvizParams, fmtNode,
+                                                    globalAttributes,
                                                     graphToDot,
                                                     nonClusteredParams,
                                                     runGraphvizCanvas)
 import           Data.GraphViz.Algorithms          (transitiveReduction)
 import           Data.GraphViz.Attributes.Complete
+import           Data.Text.Internal                (Text)
 import           Data.Text.Lazy                    (fromStrict)
 import           TheGraph                          (theGraph)
 
@@ -21,7 +23,8 @@ showGraph packageId = runGraphvizCanvas Dot g Xlib
     depsOf nodeId = subgraph (dfs [nodeId] theGraph) theGraph
     g = transitiveReduction $ graphToDot params $ depsOf  packageId
 
+params :: GraphvizParams n Text el () Text
 params = nonClusteredParams
-    { fmtNode = \(n,l) -> [Label (StrLabel (fromStrict  l))]
+    { fmtNode = \(_nodeId, nodeLabel) -> [Label (StrLabel (fromStrict nodeLabel))]
     , globalAttributes = [GraphAttrs [RankDir FromLeft] ]
     }
