@@ -31,4 +31,4 @@ httpExceptionHandler e = do
     return Nothing
 
 opts :: Options
-opts = defaults & auth ?~ oauth2Token "PASTE TOKEN HERE" -- TODO read this from environment
+opts = defaults & auth ?~ oauth2Token "bd1a263f3eb806ef2bc0e354fdee770dc9ba3ee5" -- TODO read this from environment

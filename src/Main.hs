@@ -1,10 +1,14 @@
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE NamedFieldPuns      #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Main where
+
 import           Conduit                           (concatMapC, iterMC, liftIO,
                                                     mapMC, runConduit, sinkList,
                                                     yieldMany, (.|))
+import           Control.Exception                 (Handler (Handler), catches)
+import qualified Control.Foldl                     as Fold
 import           Control.Monad                     (when)
 import           Data.Graph.Inductive.Graph        (mkGraph)
 import           Data.Graph.Inductive.PatriciaTree (Gr)
@@ -22,7 +26,8 @@ import           Test.WebDriver                    (Selector (ByCSS, ByClass, By
                                                     getCurrentURL, getText,
                                                     openPage, runSession,
                                                     useBrowser)
-
+import           Turtle
+import           Turtle.Line                       (lineToText)
 type NodeLabel = Text
 
 data PackageInfo = PackageInfo
@@ -35,7 +40,7 @@ data PackageInfo = PackageInfo
 main :: IO ()
 main = do
     dependencyPairs <- runSession chromeCaps . finallyClose $ do
-        pkgLinks <- getAllPackageLinks
+        pkgLinks <- dropWhile (not . Text.isInfixOf "purescript-ring-modules") <$> getAllPackageLinks
         runConduit $
             yieldMany pkgLinks
             .| mapMC getPackageInfo
@@ -52,12 +57,40 @@ checkLatestVersionOnPursuitCorrespondsToLatestGithubTag
         case mTag of
           Nothing -> putStrLn $ "Failed to retrieve latest tag for " <> show githubOrgAndRepo
           Just (Tag tag) -> case Text.uncons tag of
-            Just ('v', version) -> when (version /= latestVersion) $
+            Just ('v', version) -> when (version /= latestVersion) $ do
                 putStrLn $ "Package docs not up to date for " <> show githubOrgAndRepo
                            <> ". Pursuit: " <> show latestVersion
                            <> ", GitHub: " <> show tag
+                fixVersionMismatch githubOrgAndRepo (Tag tag)
+                  `catches`
+                      [ Handler $ \ (_ :: ExitCode) -> void $ putStrLn "Upgrade of module docs failed"
+                      , Handler $ \ (_ :: ShellFailed) -> void $ putStrLn "Upgrade of module docs failed"
+                      ]
+
             Just _ -> putStrLn $ "WARNING: latest tag doesn't start with 'v':" <> show tag
             Nothing -> putStrLn "WARNING: empty tag!"
+
+fixVersionMismatch :: Repo -> Tag -> IO ()
+fixVersionMismatch r@(Repo orgAndRepo) (Tag tag) = do
+    mClonedToLine <- fold
+        (inproc "cgr.hs" ["git@github.com:" <> orgAndRepo <> ".git"] empty)
+        (Fold.find $ \line -> "Repo cloned to " `Text.isPrefixOf` lineToText line)
+    case mClonedToLine of
+      Nothing -> putStrLn $ "WARNING: failed to clone repo " <> show r
+      Just line -> do
+        let clonedRepoDir = fromText . last . Text.words $ lineToText line
+        cd clonedRepoDir
+        shells "git tag" empty
+        procs "git" ["checkout", tag] empty
+        putStrLn "Is this ok? [y/n]"
+        response <- getLine
+        when (response == "y") $ do
+            shells "bower install && pulp build" empty
+            printf ("cd "%fp%" && pulp publish --no-push\n") clonedRepoDir
+            putStrLn "Done? [y/n]"
+            void getLine
+
+
 
 buildGraph :: [(Text, Text)] -> Gr NodeLabel ()
 buildGraph edgeLabels =
@@ -80,16 +113,16 @@ getPackageInfo url = do
     return PackageInfo{..}
 
 lastError :: String -> [a] -> a
-lastError err [] = error err
-lastError _ xs   = last xs
+lastError er [] = error er
+lastError _ xs  = last xs
 
 getDependencyEdges :: PackageInfo -> [(Text, Text)]
 getDependencyEdges PackageInfo{packageName, packageDeps} =
    fmap (\dep -> (dropPurescript packageName, dropPurescript dep)) packageDeps
 
 dropPurescript :: Text -> Text
-dropPurescript x =
-    fromMaybe ("JS:" <> x) $ Text.stripPrefix "purescript-" x
+dropPurescript pkgName =
+    fromMaybe ("JS:" <> pkgName) $ Text.stripPrefix "purescript-" pkgName
 
 chromeCaps :: WDConfig
 chromeCaps =

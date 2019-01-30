@@ -25,6 +25,7 @@ executable scrape-pursuit
                        base >= 4.7 && < 5,
                        conduit,
                        containers,
+                       foldl,
                        fgl,
                        graphviz,
                        http-client,
@@ -32,4 +33,5 @@ executable scrape-pursuit
                        microlens-aeson,
                        webdriver,
                        wreq,
-                       text
+                       text,
+                       turtle
