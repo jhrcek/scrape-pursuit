@@ -5,6 +5,8 @@ module Main where
 import           Conduit                           (concatMapC, iterMC, liftIO,
                                                     mapMC, runConduit, sinkList,
                                                     yieldMany, (.|))
+import           Config                            (GitHubToken, gitHubToken)
+import qualified Config
 import           Control.Monad                     (when)
 import           Data.Graph.Inductive.Graph        (mkGraph)
 import           Data.Graph.Inductive.PatriciaTree (Gr)
@@ -22,6 +24,7 @@ import           Test.WebDriver                    (Selector (ByCSS, ByClass, By
                                                     getCurrentURL, getText,
                                                     openPage, runSession,
                                                     useBrowser)
+import           Util                              (logWarn)
 
 type NodeLabel = Text
 
@@ -34,30 +37,30 @@ data PackageInfo = PackageInfo
 
 main :: IO ()
 main = do
+    token <- gitHubToken <$> Config.load
     dependencyPairs <- runSession chromeCaps . finallyClose $ do
         pkgLinks <- getAllPackageLinks
         runConduit $
             yieldMany pkgLinks
             .| mapMC getPackageInfo
-            .| iterMC (liftIO . checkLatestVersionOnPursuitCorrespondsToLatestGithubTag)
+            .| iterMC (liftIO . checkLatestVersionOnPursuitCorrespondsToLatestGithubTag token)
             .| concatMapC getDependencyEdges
             .| sinkList
     let depGraph = buildGraph dependencyPairs
     print depGraph
 
-checkLatestVersionOnPursuitCorrespondsToLatestGithubTag :: PackageInfo -> IO ()
-checkLatestVersionOnPursuitCorrespondsToLatestGithubTag
-    PackageInfo{githubOrgAndRepo, latestVersion} = do
-        mTag <- GithubAPI.getLatestTag githubOrgAndRepo
-        case mTag of
-          Nothing -> putStrLn $ "Failed to retrieve latest tag for " <> show githubOrgAndRepo
-          Just (Tag tag) -> case Text.uncons tag of
-            Just ('v', version) -> when (version /= latestVersion) $
-                putStrLn $ "Package docs not up to date for " <> show githubOrgAndRepo
-                           <> ". Pursuit: " <> show latestVersion
-                           <> ", GitHub: " <> show tag
-            Just _ -> putStrLn $ "WARNING: latest tag doesn't start with 'v':" <> show tag
-            Nothing -> putStrLn "WARNING: empty tag!"
+checkLatestVersionOnPursuitCorrespondsToLatestGithubTag :: GitHubToken -> PackageInfo -> IO ()
+checkLatestVersionOnPursuitCorrespondsToLatestGithubTag token PackageInfo{githubOrgAndRepo, latestVersion} = do
+    mTag <- GithubAPI.getLatestTag token githubOrgAndRepo
+    case mTag of
+      Nothing -> logWarn $ "Failed to retrieve latest tag for " <> show githubOrgAndRepo
+      Just (Tag tag) -> case Text.uncons tag of
+        Just ('v', version) -> when (version /= latestVersion) $
+            putStrLn $ "Package docs not up to date for " <> show githubOrgAndRepo
+                       <> ". Pursuit: " <> show latestVersion
+                       <> ", GitHub: " <> show tag
+        Just _ -> logWarn $ "latest tag doesn't start with 'v':" <> show tag
+        Nothing -> logWarn "empty tag!"
 
 buildGraph :: [(Text, Text)] -> Gr NodeLabel ()
 buildGraph edgeLabels =

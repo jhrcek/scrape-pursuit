@@ -14,9 +14,10 @@ wget http://repo.spring.io/plugins-release/org/seleniumhq/selenium/selenium-serv
 java -jar selenium-server-standalone-2.53.0.jar
 ```
 
-3.  Build and run this tool using stack
+3.  Generate GitHub [personal access token](https://github.com/settings/tokens) to avoid failures due to rate-limiting
+4.  Build and run the tool using [stack](https://docs.haskellstack.org/en/stable/README/)
 
 ```bash
 stack build
-stack exec scrape-pursuit
+stack exec scrape-pursuit -- --github-token <TOKEN>
 ```

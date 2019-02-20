@@ -16,13 +16,16 @@ extra-source-files:  README.md
 executable scrape-pursuit
   hs-source-dirs:      src
   main-is:             Main.hs
-  other-modules:       GithubAPI,
+  other-modules:       Config,
+                       GithubAPI,
                        GraphViz,
+                       Util,
                        TheGraph
   default-language:    Haskell2010
   ghc-options: -Wall
   build-depends:       aeson,
                        base >= 4.7 && < 5,
+                       bytestring,
                        conduit,
                        containers,
                        fgl,
@@ -30,6 +33,7 @@ executable scrape-pursuit
                        http-client,
                        microlens,
                        microlens-aeson,
+                       optparse-applicative,
                        webdriver,
                        wreq,
                        text
